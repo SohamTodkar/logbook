@@ -3,15 +3,30 @@ import styled from 'styled-components';
 import { VisuallyHidden } from '../styles';
 
 const Sheet = styled.dialog<{ $visible: boolean; $wide: boolean; $compact: boolean }>`
-  width: min(${({ $wide, $compact }) => $compact ? '420px' : $wide ? '720px' : '620px'}, calc(100vw - 32px)); max-height: calc(100dvh - 40px);
-  padding: ${({ $compact }) => $compact ? '12px' : '32px'}; border: 0; border-radius: 16px; color: var(--ink); background: var(--surface);
-  box-shadow: ${({ $compact }) => $compact ? '' : '0 0 0 1px #00000008,'} 0 16px 60px #202a2526; overflow-y: auto;
-  opacity: ${({ $visible }) => $visible ? 1 : 0}; transform: translateY(${({ $visible }) => $visible ? '0' : '8px'});
-  transition: opacity 160ms ease-out, transform 160ms ease-out;
-  &::backdrop { background: var(--backdrop); backdrop-filter: blur(3px); }
+  width: min(${({ $wide, $compact }) => $compact ? '440px' : $wide ? '740px' : '640px'}, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: ${({ $compact }) => $compact ? '20px' : '32px'};
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow-y: auto;
+  opacity: ${({ $visible }) => $visible ? 1 : 0};
+  transform: scale(${({ $visible }) => $visible ? '1' : '0.96'}) translateY(${({ $visible }) => $visible ? '0' : '10px'});
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  
+  &::backdrop {
+    background: var(--backdrop);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
   @media (max-width: 500px) {
-    width: calc(100vw - 16px); max-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)));
-    padding: ${({ $compact }) => $compact ? '12px' : '22px 18px'}; border-radius: 18px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top)) - max(20px, env(safe-area-inset-bottom)));
+    padding: ${({ $compact }) => $compact ? '16px' : '24px 18px'};
+    border-radius: 18px;
   }
 `;
 
@@ -29,7 +44,7 @@ export function Modal({ open, onClose, title, children, wide = false, compact = 
       return () => cancelAnimationFrame(frame);
     }
     setVisible(false);
-    const timeout = setTimeout(() => dialog.close(), 160);
+    const timeout = setTimeout(() => dialog.close(), 180);
     return () => clearTimeout(timeout);
   }, [open]);
   return <Sheet ref={ref} $wide={wide} $compact={compact} $visible={visible} aria-labelledby={titleId} onCancel={e => { e.preventDefault(); onClose(); }} onClick={e => {

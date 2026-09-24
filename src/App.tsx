@@ -1,17 +1,32 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import styled, { css, keyframes } from 'styled-components';
-import { ChartNoAxesColumn, Github, Moon, Sun, Timer as TimerIcon } from 'lucide-react';
+import {
+  ChartNoAxesColumn,
+  Github,
+  Moon,
+  Sun,
+  Play,
+  Square,
+  Search,
+  PanelLeft,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  X,
+  Calendar,
+  HelpCircle,
+} from 'lucide-react';
 import { api, errorMessage, localDate, recoverEarlierDrafts, timerDuration } from './api';
 import { FocusSound } from './audio';
 import type { Day, JournalData, Session } from './types';
-import { Button, Muted, TextButton, press } from './styles';
+import { Button, Muted, TextButton } from './styles';
 import { Journal, Todos } from './components/Journal';
 import { TagTabs } from './components/TagTabs';
 import { JournalContext, flushDrafts } from './JournalContext';
 import { Modal } from './components/Modal';
 import type { SearchHit } from './components/SearchModal';
 import { documentUndo, recordCompletion } from './documentHistory';
-import { compactViewport, shortViewport } from './layout';
+import { compactViewport } from './layout';
 
 const JOURNAL_PAGE_SIZE = 14;
 const REPOSITORY_URL = import.meta.env.VITE_REPOSITORY_URL || 'https://github.com/divyavenn/still';
@@ -21,231 +36,381 @@ const SearchModal = lazy(() => import('./components/SearchModal').then(module =>
 
 const Page = styled.div<{ $focusing: boolean }>`
   --current-page-paper: ${({ $focusing }) => $focusing ? 'var(--page-focus-paper)' : 'var(--page-paper)'};
-  --document-width: min(680px, calc(100vw - 64px));
-  --left-margin: calc((100vw - var(--document-width)) * .54);
-  --right-margin: calc(100vw - var(--document-width) - var(--left-margin));
-  --page-top: 48px;
-  --todo-heading-height: 44px;
-  @media(pointer: coarse) { --todo-heading-height: 48px; }
-  height: 100dvh; overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background-color: var(--current-page-paper);
-  transition: background-color 180ms ease-out;
-  [data-focus-chrome] { opacity: ${({ $focusing }) => $focusing ? 'var(--focus-chrome-opacity)' : 'var(--chrome-opacity)'}; transition: opacity 180ms ease-out; }
-  ${({ $focusing }) => $focusing && css`
-    :root:not([data-theme='night']) & [data-focus-surface] {
-      --paper: color-mix(in srgb, #f2f1ed, #000 16%);
-      --ink: color-mix(in srgb, #242422, #000 16%);
-      --muted: color-mix(in srgb, #626762, #000 16%);
-      --line: color-mix(in srgb, #d4d2cb, #000 16%);
-      --sage: color-mix(in srgb, #59605d, #000 16%);
-      --soft: color-mix(in srgb, #e8e6df, #000 16%);
-      --surface: color-mix(in srgb, #faf9f6, #000 16%);
-      --field: color-mix(in srgb, #fffefa, #000 16%);
-      --date-bg: color-mix(in srgb, #dfe7ed, #000 16%);
-      --tag-bg: color-mix(in srgb, #e8e6df, #000 16%);
-      --tag-ink: color-mix(in srgb, #525a56, #000 16%);
-      --tag-selected: color-mix(in srgb, #1871ba, #000 16%);
-      --code-bg: color-mix(in srgb, #e6e7e1, #000 16%);
-      --code-ink: color-mix(in srgb, #4d615d, #000 16%);
-      --quote: color-mix(in srgb, #5f645f, #000 16%);
-      --selection: color-mix(in srgb, #ccdbe7, #000 16%);
-      --focus: color-mix(in srgb, #6f7f88, #000 16%);
-      --link: color-mix(in srgb, #1871ba, #000 16%);
-      --url: color-mix(in srgb, #70588f, #000 16%);
-      --checkbox: color-mix(in srgb, #747773, #000 16%);
-      --scrollbar: color-mix(in srgb, #c0beb7, #000 16%);
-    }
-  `}
-  @media ${compactViewport} {
-    --document-width: min(680px, calc(100vw - max(24px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right))));
-    --page-top: max(16px, env(safe-area-inset-top)); --todo-heading-height: 36px;
-    --left-margin: max(24px, env(safe-area-inset-left), calc((100vw - var(--document-width)) * .54));
-    --right-margin: calc(100vw - var(--document-width) - var(--left-margin));
+  transition: background-color 200ms ease;
+
+  [data-focus-chrome] {
+    opacity: ${({ $focusing }) => $focusing ? 'var(--focus-chrome-opacity)' : 'var(--chrome-opacity)'};
+    transition: opacity 200ms ease;
   }
 `;
-const ringPulse = keyframes`
-  from { scale: 1; opacity: .65; }
-  to { scale: 1.14; opacity: 0; }
+
+const pulseGlow = keyframes`
+  0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7); }
+  70% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 8px rgba(79, 70, 229, 0); }
+  100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
 `;
-const pageControl = css`
-  ${press}; position: relative; display: grid; place-items: center;
-  width: 28px; height: 36px; padding: 0; border: 0; border-radius: 50%;
-  background: transparent; color: var(--muted); text-decoration: none;
-  svg, [data-shortcut-icon] { transition: scale 140ms ease-out; }
-  &:hover { color: var(--link); }
-  &:hover svg, &:hover [data-shortcut-icon] { scale: 1.05; }
-  @media(pointer: coarse) { width: 44px; height: 44px; }
+
+const pulseGlowTeal = keyframes`
+  0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.7); }
+  70% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 8px rgba(45, 212, 191, 0); }
+  100% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
 `;
-const ThemeToggle = styled.button`${pageControl}`;
-const RepositoryLink = styled.a`${pageControl}`;
-const ShortcutToggle = styled.button`${pageControl}`;
-const ShortcutGlyph = styled.span`
-  width: 15px; height: 15px; display: block; background: currentColor;
-  mask: url('/icons/shortcut-flaticon.png') center / contain no-repeat;
-  -webkit-mask: url('/icons/shortcut-flaticon.png') center / contain no-repeat;
+
+const TopNav = styled.header`
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: all 200ms ease;
+
+  @media ${compactViewport} {
+    padding: 10px 16px;
+  }
 `;
-const ThemeGlyph = styled.span<{ $shown: boolean }>`
-  position: absolute; display: grid; place-items: center; pointer-events: none;
-  opacity: ${({ $shown }) => $shown ? 1 : 0}; scale: ${({ $shown }) => $shown ? 1 : .25};
-  filter: blur(${({ $shown }) => $shown ? 0 : 4}px);
-  transition: opacity 150ms cubic-bezier(.2,0,0,1), scale 150ms cubic-bezier(.2,0,0,1), filter 150ms cubic-bezier(.2,0,0,1);
+
+const NavLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
 `;
-const StatsToggle = styled.button`${pageControl}`;
-const SidebarControls = styled.div`display: flex; align-items: center;`;
-const TimerChrome = styled.div`
-  position: fixed; top: 20px; right: 24px; z-index: 43;
-  display: flex; align-items: center; gap: 10px;
-  @media ${compactViewport} { top: max(12px, env(safe-area-inset-top)); right: 12px; }
-`;
-const TimerTime = styled.span`
-  color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: -.01em;
-`;
-const TimerButton = styled.button<{ $pulse: boolean; $running: boolean }>`
-  ${press}; position: relative; width: 44px; height: 44px; display: grid; place-items: center; flex-shrink: 0;
-  padding: 0; border: 0; border-radius: 50%; background: var(--timer); color: var(--timer-ink);
-  &::before { content: ''; position: absolute; inset: -3px; border: 1px solid var(--timer-ring); border-radius: 50%; pointer-events: none; transition: border-color 160ms ease-out; }
-  &::after { content: ''; position: absolute; inset: -3px; border: 1px solid ${({ $running }) => $running ? 'var(--timer-running-ring)' : 'var(--timer-ring)'}; border-radius: 50%; pointer-events: none; opacity: 0;
-    ${({ $pulse }) => $pulse && css`animation: ${ringPulse} 360ms ease-out;`} }
-  &:hover { background: var(--timer-hover); }
-  &[aria-pressed='true'] { background: var(--timer-running); scale: 1.03; }
-  &[aria-pressed='true']:hover { background: var(--timer-running-hover); }
-  &[aria-pressed='true']::before { border-color: var(--timer-running-ring); }
-`;
-const ShortHeader = styled.div`
-  height: 44px; flex-shrink: 0;
-`;
-const MobileTabs = styled.div`
-  position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; z-index: 43;
-  height: 44px; display: flex; align-items: center;
-`;
-const MobileTab = styled.button<{ $active: boolean }>`
-  position: relative; width: 44px; height: 44px; padding: 0; border: 0; background: transparent;
-  color: ${({ $active }) => $active ? 'var(--link)' : 'var(--muted)'};
-  font-size: 0;
-  &::before { content: ''; position: absolute; left: 50%; top: 50%; width: ${({ $active }) => $active ? '7px' : '5px'}; height: ${({ $active }) => $active ? '7px' : '5px'};
-    border-radius: 50%; background: currentColor; opacity: ${({ $active }) => $active ? 1 : .48}; translate: -50% -50%;
-    transition: width 120ms ease-out, height 120ms ease-out, color 120ms ease-out, opacity 120ms ease-out; }
-  &:first-child::before { translate: calc(-50% + 16px) -50%; }
-  &:last-child::before { translate: calc(-50% - 16px) -50%; }
-`;
-const MobilePager = styled.div`
-  display: flex; flex: 1; min-height: 0; width: 100%; overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
-`;
-const MobilePane = styled.section`
-  flex: 0 0 100%; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
-  scroll-snap-align: start; scroll-snap-stop: always;
+
+const BrandButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 0;
   padding: 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+
+  .logo-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: var(--primary-ink);
+  }
 `;
-const MobileTags = styled.div`
-  padding: 0 2px max(12px, env(safe-area-inset-bottom));
+
+const SearchTrigger = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 140ms ease;
+
+  kbd {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 5px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  &:hover {
+    background: var(--surface-elevated);
+    border-color: var(--focus);
+    color: var(--ink);
+  }
+
+  @media (max-width: 640px) {
+    display: none;
+  }
 `;
-const MobileTagCollection = styled.div`
-  display: flex; flex-wrap: wrap; align-content: start; gap: 4px;
+
+const NavCenter = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  @media (max-width: 840px) {
+    display: none;
+  }
 `;
-const MobileTagPillLabel = styled.span`display: block; translate: 0 -1px;`;
-const MobileTagPill = styled.button<{ $selected: boolean }>`
-  ${press}; min-height: 38px; max-width: 100%; padding: 5px 10px;
-  border: 1px solid ${({ $selected }) => $selected ? 'var(--tag-selected)' : 'var(--line)'}; border-radius: 999px; overflow-wrap: anywhere;
-  background: transparent; color: ${({ $selected }) => $selected ? 'var(--tag-selected)' : 'var(--tag-ink)'};
-  font-size: 14px; line-height: 20px;
-  transition: border-color 140ms ease-out, color 140ms ease-out, scale 150ms ease-out;
+
+const FilterPill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--tag-bg);
+  border: 1px solid var(--line);
+  color: var(--tag-ink);
+  font-size: 12px;
+  font-weight: 500;
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.7;
+    &:hover { opacity: 1; }
+  }
 `;
-const MobileTagControls = styled.div`
-  margin-top: 10px;
-  button, a { width: 36px; height: 36px; }
+
+const NavRight = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
 `;
-const SoundMenu = styled.div`display: grid; gap: 8px; padding: 4px; button { justify-content: center; } input { width: 100%; min-height: 40px; accent-color: var(--link); }`;
+
+const FocusCapsule = styled.div<{ $running: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  background: ${({ $running }) => $running ? 'var(--tag-bg)' : 'var(--soft)'};
+  border: 1px solid ${({ $running }) => $running ? 'var(--timer-running-ring)' : 'var(--line)'};
+  border-radius: 999px;
+  transition: all 200ms ease;
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: ${({ $running }) => $running ? 'var(--primary)' : 'var(--muted)'};
+    ${({ $running }) => $running && css`
+      animation: ${pulseGlow} 2s infinite;
+      :root[data-theme='night'] & {
+        animation: ${pulseGlowTeal} 2s infinite;
+      }
+    `}
+  }
+
+  .time-text {
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: ${({ $running }) => $running ? 'var(--primary)' : 'var(--muted)'};
+    letter-spacing: -0.01em;
+  }
+`;
+
+const CapsuleAction = styled.button<{ $primary?: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: ${({ $primary }) => $primary ? 'var(--primary)' : 'transparent'};
+  color: ${({ $primary }) => $primary ? 'var(--primary-ink)' : 'var(--muted)'};
+  cursor: pointer;
+  transition: all 120ms ease;
+
+  &:hover {
+    transform: scale(1.08);
+    color: ${({ $primary }) => $primary ? 'var(--primary-ink)' : 'var(--ink)'};
+  }
+
+  &:active {
+    transform: scale(0.94);
+  }
+`;
+
+const NavIconButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 120ms ease;
+
+  &:hover {
+    background: var(--soft);
+    color: var(--ink);
+    border-color: var(--line);
+  }
+`;
+
+const MainContainer = styled.main`
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+
+  @media ${compactViewport} {
+    padding: 16px 12px 60px;
+  }
+`;
+
+const LogViewport = styled.div`
+  flex: 1;
+  min-height: min(240px, max(64px, calc(100dvh - 160px)));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  padding-bottom: 24px;
+`;
+
+const Toast = styled.div`
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: min(540px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+`;
+
+const SoundMenu = styled.div`
+  display: grid;
+  gap: 12px;
+  padding: 6px;
+  button { justify-content: center; }
+  input { width: 100%; min-height: 36px; accent-color: var(--primary); }
+`;
+
 const ShortcutPanel = styled.div`
-  padding: 4px 12px 8px;
+  padding: 6px 12px 12px;
 `;
+
 const ShortcutRows = styled.div`
-  display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 20px; row-gap: 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 20px;
+  row-gap: 6px;
 `;
+
 const ShortcutRow = styled.div`
   display: contents;
-  > * { min-height: 34px; padding: 8px 0; box-sizing: border-box; }
-`;
-const Keys = styled.span`color: var(--muted); font-size: 12px; text-align: left; text-transform: lowercase; white-space: nowrap;`;
-const Demo = styled.span`
-  min-width: 0; line-height: 1.35; font-size: 13px; color: var(--ink); text-align: left;
-  strong { font-weight: 700; } em { font-style: italic; } u { text-underline-offset: 2px; }
-  a { color: var(--link); text-decoration: none; }
-  code { padding: 0; border-radius: 0; background: transparent; color: var(--code-ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-`;
-const Main = styled.main`
-  width: var(--document-width); margin: var(--page-top) var(--right-margin) 0 var(--left-margin);
-  flex: 1; display: flex; flex-direction: column; min-height: 0;
-`;
-const LogFrame = styled.div`
-  position: relative; flex: 1; min-height: min(240px, max(64px, calc(100dvh - 160px))); display: flex;
-  @media ${compactViewport} { min-height: 0; padding: 0 0 max(12px, env(safe-area-inset-bottom)); }
-`;
-const LogViewport = styled.div`
-  flex: 1; min-height: min(240px, max(64px, calc(100dvh - 160px))); overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain;
-  padding: 4px 12px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent;
-  @media ${compactViewport} { min-height: 0; padding: 0 2px 10px 0; }
-`;
-const LogEdgeWash = styled.div<{ $shown: boolean }>`
-  position: absolute; z-index: 7; top: -2px; left: -24px; right: -24px; height: 30px; pointer-events: none;
-  opacity: ${({ $shown }) => $shown ? 1 : 0};
-  background: linear-gradient(to bottom, var(--current-page-paper) 0%, color-mix(in srgb, var(--current-page-paper) 72%, transparent) 34%, transparent 82%);
-  transition: opacity 140ms ease-out;
-  &::after {
-    content: ''; position: absolute; inset: 0;
-    background-image:
-      radial-gradient(ellipse 22% 105% at 7% -8%, var(--current-page-paper) 0 48%, transparent 82%),
-      radial-gradient(ellipse 30% 92% at 31% -10%, var(--current-page-paper) 0 44%, transparent 80%),
-      radial-gradient(ellipse 24% 112% at 56% -18%, var(--current-page-paper) 0 50%, transparent 84%),
-      radial-gradient(ellipse 32% 96% at 82% -9%, var(--current-page-paper) 0 42%, transparent 79%),
-      radial-gradient(ellipse 18% 108% at 101% -16%, var(--current-page-paper) 0 49%, transparent 83%);
-    mask-image: linear-gradient(to bottom, #000 0%, #000d 40%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000d 40%, transparent 100%);
-    opacity: .88;
+  > * {
+    min-height: 32px;
+    padding: 6px 0;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
   }
 `;
-const Toast = styled.div`position: fixed; bottom: max(25px, calc(env(safe-area-inset-bottom) + 12px)); left: 50%; transform: translateX(-50%); z-index: 30; max-width: min(540px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 19px; background: var(--surface); border-radius: 12px; box-shadow: 0 0 0 1px #00000007, 0 4px 24px #31392b19; font-size: 12px;`;
-const QuietStatus = styled.div`
-  position: fixed; right: 24px; bottom: 18px; z-index: 20; pointer-events: none;
-  color: var(--muted); font-size: 11px; opacity: 0; transform: translateY(2px);
-  transition: opacity 140ms ease-out, transform 140ms ease-out;
-  &[data-show='true'] { opacity: .82; transform: translateY(0); }
+
+const Keys = styled.span`
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  kbd {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--soft);
+    border: 1px solid var(--line);
+    color: var(--ink);
+  }
 `;
-const ConnectionState = styled.div`padding: 50px 0; display: grid; gap: 16px; justify-items: start; @media ${shortViewport} { display: none; }`;
+
+const Demo = styled.span`
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink);
+  code {
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: var(--soft);
+    color: var(--primary);
+    font-size: 12px;
+  }
+`;
+
+const ConnectionState = styled.div`
+  padding: 60px 0;
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+  text-align: center;
+`;
 
 export default function App({ locked = false, load = !locked, onReady, onLoadError }: {
   locked?: boolean; load?: boolean; onReady?: () => void; onLoadError?: () => void;
 }) {
   const [data, setData] = useState<JournalData | null>(null);
   const [night, setNight] = useState(() => localStorage.getItem('still-theme') === 'night');
+
   useEffect(() => {
     document.documentElement.dataset.theme = night ? 'night' : 'day';
     localStorage.setItem('still-theme', night ? 'night' : 'day');
   }, [night]);
+
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const tagRef = useRef<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [completed, setCompleted] = useState(new Set<number>());
   const [reopened, setReopened] = useState(new Set<number>());
   const [undoTask, setUndoTask] = useState<{ id: number; completedAt: string } | null>(null);
   const [target, setTarget] = useState<{ kind: 'notes' | 'tasks'; id: number } | null>(null);
   const completionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reopenTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const onComplete = (ids: number[], taskId?: number, completedAt?: string) => {
     if (completionTimeout.current) clearTimeout(completionTimeout.current);
     setCompleted(new Set(ids));
     if (taskId && completedAt) { recordCompletion(taskId, completedAt); setUndoTask({ id: taskId, completedAt }); }
     completionTimeout.current = setTimeout(() => setCompleted(new Set()), 1000);
   };
+
   const onReopen = (ids: number[]) => {
     if (reopenTimeout.current) clearTimeout(reopenTimeout.current);
     setReopened(new Set(ids));
     reopenTimeout.current = setTimeout(() => setReopened(new Set()), 1000);
   };
+
   useEffect(() => () => {
     if (completionTimeout.current) clearTimeout(completionTimeout.current);
     if (reopenTimeout.current) clearTimeout(reopenTimeout.current);
   }, []);
+
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -253,16 +418,8 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
   const [searchOpen, setSearchOpen] = useState(false);
   const [soundOpen, setSoundOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [short, setShort] = useState(() => window.matchMedia(shortViewport).matches);
-  const viewportWidth = useRef(window.innerWidth);
-  const [mobileView, setMobileView] = useState<'todos' | 'log' | 'tags'>('log');
-  const mobilePager = useRef<HTMLDivElement>(null);
-  const quietStatus = useRef<HTMLDivElement>(null);
-  const quietStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [logScrolled, setLogScrolled] = useState(false);
   const [sessionsDate, setSessionsDate] = useState<string | null>(null);
   const [timerBusy, setTimerBusy] = useState(false);
-  const [timerPulse, setTimerPulse] = useState(false);
   const [audible, setAudible] = useState(false);
   const [volume, setVolume] = useState(() => Math.max(0, Math.min(1, Number(localStorage.getItem('still-volume') ?? '0.22') || 0)));
   const sound = useRef(new FocusSound());
@@ -271,59 +428,28 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
   const generation = useRef(0);
   const loadedThrough = useRef<string | null>(null);
   const logViewport = useRef<HTMLDivElement>(null);
+
   const notify = useCallback((text: string) => setMessage(text), []);
-  useEffect(() => {
-    const media = window.matchMedia(shortViewport);
-    const coarse = window.matchMedia('(pointer: coarse)');
-    const resize = () => {
-      const widthChanged = Math.abs(window.innerWidth - viewportWidth.current) > 80;
-      viewportWidth.current = window.innerWidth;
-      const active = document.activeElement;
-      const editing = active instanceof HTMLElement && (active.isContentEditable || active.matches('input, textarea'));
-      setShort(previous => coarse.matches && editing && !widthChanged && media.matches !== previous ? previous : media.matches);
-    };
-    media.addEventListener('change', resize);
-    window.addEventListener('resize', resize);
-    return () => { media.removeEventListener('change', resize); window.removeEventListener('resize', resize); };
-  }, []);
-  useEffect(() => {
-    if (!short) return;
-    const align = () => {
-      const pager = mobilePager.current;
-      if (pager) pager.scrollTo({ left: ({ todos: 0, log: 1, tags: 2 } as const)[mobileView] * pager.clientWidth });
-    };
-    const frame = requestAnimationFrame(align);
-    window.addEventListener('resize', align);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', align); };
-  }, [short, mobileView]);
+
   useEffect(() => {
     if (locked) return;
     const shortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.metaKey || event.ctrlKey) {
-        if (['z', 'y'].includes(event.key.toLowerCase())) { event.preventDefault(); void documentUndo(event.shiftKey || event.key.toLowerCase() === 'y').catch(e => notify(errorMessage(e))); }
-        if (event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); }
+        if (['z', 'y'].includes(event.key.toLowerCase())) {
+          event.preventDefault();
+          void documentUndo(event.shiftKey || event.key.toLowerCase() === 'y').catch(e => notify(errorMessage(e)));
+        }
+        if (event.key.toLowerCase() === 'k' || event.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          setSearchOpen(true);
+        }
       }
     };
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
-  }, [locked]);
-  useEffect(() => {
-    const saveState = (event: Event) => {
-      const value = (event as CustomEvent<string>).detail;
-      const status = quietStatus.current;
-      if (!status) return;
-      if (quietStatusTimer.current) clearTimeout(quietStatusTimer.current);
-      if (value === 'clear') { status.dataset.show = 'false'; return; }
-      status.textContent = value === 'saving' ? 'saving…' : 'saved'; status.dataset.show = 'true';
-      if (value === 'saved') quietStatusTimer.current = setTimeout(() => { status.dataset.show = 'false'; }, 900);
-    };
-    window.addEventListener('still-save-state', saveState);
-    return () => {
-      window.removeEventListener('still-save-state', saveState);
-      if (quietStatusTimer.current) clearTimeout(quietStatusTimer.current);
-    };
-  }, []);
+  }, [locked, notify]);
+
   const refresh = useCallback(async (includeHistory = true) => {
     const sequence = ++generation.current;
     const tagQuery = tagRef.current ? '&tag=' + encodeURIComponent(tagRef.current) : '';
@@ -349,6 +475,7 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
     });
     setError('');
   }, [notify]);
+
   useEffect(() => {
     const applied = () => { void refresh().catch(e => notify(errorMessage(e))); };
     const failed = (event: Event) => notify((event as CustomEvent<string>).detail);
@@ -356,13 +483,18 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
     window.addEventListener('still-history-applied', applied);
     window.addEventListener('still-history-error', failed);
     window.addEventListener('still-history-available', edited);
-    return () => { window.removeEventListener('still-history-applied', applied); window.removeEventListener('still-history-error', failed); window.removeEventListener('still-history-available', edited); };
+    return () => {
+      window.removeEventListener('still-history-applied', applied);
+      window.removeEventListener('still-history-error', failed);
+      window.removeEventListener('still-history-available', edited);
+    };
   }, [refresh, notify]);
 
   useEffect(() => {
     if (!load) { setData(null); return; }
     void refresh(false).catch(e => { setError(errorMessage(e)); onLoadError?.(); });
   }, [refresh, activeTag, load, onLoadError]);
+
   useEffect(() => {
     if (locked || !load) return;
     const interval = setInterval(() => { void refresh(false).catch(e => setError(errorMessage(e))); }, 15000);
@@ -370,13 +502,16 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
     window.addEventListener('focus', focus);
     return () => { clearInterval(interval); window.removeEventListener('focus', focus); };
   }, [refresh, locked, load]);
+
   useEffect(() => { if (data && load) onReady?.(); }, [data, load, onReady]);
+
   useEffect(() => {
     if (!data?.active_session) return;
     setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [data?.active_session?.id]);
+
   useEffect(() => {
     if (locked) return;
     let day = localDate();
@@ -386,49 +521,70 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
     }, 1000);
     return () => clearInterval(interval);
   }, [refresh, locked]);
-  useEffect(() => { if (!message) return; const id = setTimeout(() => setMessage(''), 6500); return () => clearTimeout(id); }, [message]);
+
+  useEffect(() => {
+    if (!message) return;
+    const id = setTimeout(() => setMessage(''), 6000);
+    return () => clearTimeout(id);
+  }, [message]);
+
   useEffect(() => {
     if (!data?.active_session) { sound.current.stop(); setAudible(false); }
   }, [data?.active_session?.id]);
-  useEffect(() => { const currentSound = sound.current; return () => currentSound.dispose(); }, []);
+
+  useEffect(() => {
+    const currentSound = sound.current;
+    return () => currentSound.dispose();
+  }, []);
 
   const active = data?.active_session;
-  useEffect(() => {
-    let icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!icon) { icon = document.createElement('link'); icon.rel = 'icon'; document.head.appendChild(icon); }
-    const paper = night ? '#011627' : '#d9dcdd';
-    const ink = active ? (night ? '#75d1c4' : '#48675e') : (night ? '#8ca0b0' : '#777b7e');
-    const inner = active ? `<circle cx="16" cy="16" r="5" fill="${ink}"/>` : '';
-    icon.href = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="${paper}"/><circle cx="16" cy="16" r="10" fill="none" stroke="${ink}" stroke-width="2"/>${inner}</svg>`)}`;
-  }, [active, night]);
+
   const adjustedNow = now + clockOffset.current;
   const elapsed = active ? Math.max(0, (adjustedNow - new Date(active.started_at).getTime()) / 1000) : 0;
+
   const toggleTimer = async () => {
     if (timerLock.current) return;
-    timerLock.current = true; setTimerBusy(true);
+    timerLock.current = true;
+    setTimerBusy(true);
     try {
       if (active) {
         await api<Session>('/timer/stop', 'POST', { session_id: active.id });
-        sound.current.stop(); setAudible(false);
+        sound.current.stop();
+        setAudible(false);
         setData(current => current ? { ...current, active_session: null } : current);
       } else {
-        if (localStorage.getItem('still-muted') !== 'true') void sound.current.start(volume).then(() => setAudible(true)).catch(() => notify('Audio paused. Open the timer’s sound menu to resume.'));
+        if (localStorage.getItem('still-muted') !== 'true') {
+          void sound.current.start(volume).then(() => setAudible(true)).catch(() => notify('Audio paused. Open sound menu to resume.'));
+        }
         const started = await api<Session>('/timer/start', 'POST');
         setData(current => current ? { ...current, active_session: started } : current);
       }
-      setTimerPulse(false);
-      if (!active) {
-        requestAnimationFrame(() => setTimerPulse(true));
-        setTimeout(() => setTimerPulse(false), 400);
-      }
       await refresh();
-    } catch (e) { if (!active) { sound.current.stop(); setAudible(false); } notify(errorMessage(e)); }
-    finally { timerLock.current = false; setTimerBusy(false); }
+    } catch (e) {
+      if (!active) { sound.current.stop(); setAudible(false); }
+      notify(errorMessage(e));
+    } finally {
+      timerLock.current = false;
+      setTimerBusy(false);
+    }
   };
+
   const toggleSound = async () => {
-    if (audible) { sound.current.stop(); setAudible(false); localStorage.setItem('still-muted', 'true'); }
-    else { try { await sound.current.start(volume); setAudible(true); localStorage.setItem('still-muted', 'false'); } catch { notify('Your browser couldn’t start audio. The timer is still tracking your focus.'); } }
+    if (audible) {
+      sound.current.stop();
+      setAudible(false);
+      localStorage.setItem('still-muted', 'true');
+    } else {
+      try {
+        await sound.current.start(volume);
+        setAudible(true);
+        localStorage.setItem('still-muted', 'false');
+      } catch {
+        notify('Your browser couldn’t start audio. Timer is still running.');
+      }
+    }
   };
+
   const secondsForDay = (day: Day) => {
     if (!active || !data || day.date !== data.today) return day.focused_seconds;
     return day.focused_seconds + Math.max(0, (adjustedNow - new Date(data.server_time).getTime()) / 1000);
@@ -437,10 +593,14 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
   const selectTag = async (tag: string | null) => {
     try {
       await flushDrafts();
-      tagRef.current = tag; loadedThrough.current = null; generation.current++;
+      tagRef.current = tag;
+      loadedThrough.current = null;
+      generation.current++;
       setActiveTag(tag);
       if (logViewport.current) logViewport.current.scrollTop = 0;
-    } catch (error) { notify(errorMessage(error)); }
+    } catch (error) {
+      notify(errorMessage(error));
+    }
   };
 
   const loadMore = useCallback(async () => {
@@ -450,122 +610,292 @@ export default function App({ locked = false, load = !locked, onReady, onLoadErr
     const more = await api<JournalData>(`/journal?before=${cursor}&limit=${JOURNAL_PAGE_SIZE}${filter ? '&tag=' + encodeURIComponent(filter) : ''}`);
     if (filter !== tagRef.current) return;
     loadedThrough.current = more.days.at(-1)?.date ?? loadedThrough.current;
-    setData(current => current ? { ...current, days: [...current.days, ...more.days.filter(day => !current.days.some(existing => existing.date === day.date))], next_cursor: more.next_cursor } : current);
+    setData(current => current ? {
+      ...current,
+      days: [...current.days, ...more.days.filter(day => !current.days.some(existing => existing.date === day.date))],
+      next_cursor: more.next_cursor
+    } : current);
   }, [data?.next_cursor]);
 
   const jumpTo = async (hit: SearchHit) => {
     try {
       await flushDrafts();
-      tagRef.current = null; loadedThrough.current = null; setActiveTag(null); setTarget(null);
+      tagRef.current = null;
+      loadedThrough.current = null;
+      setActiveTag(null);
+      setTarget(null);
       await refresh();
       if (hit.date) {
         const result = await api<JournalData>(`/journal?on=${hit.date}`);
-        setData(current => current ? { ...current, days: [...current.days.filter(day => day.date !== hit.date), ...result.days].sort((a, b) => b.date.localeCompare(a.date)) } : current);
+        setData(current => current ? {
+          ...current,
+          days: [...current.days.filter(day => day.date !== hit.date), ...result.days].sort((a, b) => b.date.localeCompare(a.date))
+        } : current);
       }
       setSearchOpen(false);
       setTimeout(() => setTarget({ kind: hit.kind, id: hit.id }), 180);
-    } catch (e) { notify(errorMessage(e)); }
+    } catch (e) {
+      notify(errorMessage(e));
+    }
   };
 
-  const sidebarControls = <SidebarControls role="group" aria-label="Page controls" data-focus-chrome>
-    {REPOSITORY_URL && <RepositoryLink href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" aria-label="GitHub repository" title="GitHub"><Github size={15} aria-hidden="true" /></RepositoryLink>}
-    <StatsToggle aria-label="Open focus statistics" title="Statistics" onClick={() => setStatsOpen(true)}><ChartNoAxesColumn size={15} aria-hidden="true" /></StatsToggle>
-    <ShortcutToggle aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={() => setShortcutsOpen(true)}><ShortcutGlyph data-shortcut-icon aria-hidden="true" /></ShortcutToggle>
-    <ThemeToggle role="switch" aria-label="Night mode" aria-checked={night}
-      title={night ? 'Use day mode' : 'Use night mode'} onClick={() => setNight(value => !value)}>
-      <ThemeGlyph $shown={!night} data-icon="sun" aria-hidden="true"><Sun size={15} /></ThemeGlyph>
-      <ThemeGlyph $shown={night} data-icon="moon" aria-hidden="true"><Moon size={15} /></ThemeGlyph>
-    </ThemeToggle>
-  </SidebarControls>;
+  const sidebarControls = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      {REPOSITORY_URL && (
+        <NavIconButton
+          as="a"
+          href={REPOSITORY_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub repository"
+          title="GitHub"
+        >
+          <Github size={16} />
+        </NavIconButton>
+      )}
+      <NavIconButton aria-label="Focus statistics" title="Statistics" onClick={() => setStatsOpen(true)}>
+        <ChartNoAxesColumn size={16} />
+      </NavIconButton>
+      <NavIconButton aria-label="Keyboard shortcuts" title="Keyboard shortcuts" onClick={() => setShortcutsOpen(true)}>
+        <HelpCircle size={16} />
+      </NavIconButton>
+      <NavIconButton
+        role="switch"
+        aria-label="Toggle theme"
+        aria-checked={night}
+        title={night ? 'Light mode' : 'Dark mode'}
+        onClick={() => setNight(v => !v)}
+      >
+        {night ? <Sun size={16} /> : <Moon size={16} />}
+      </NavIconButton>
+    </div>
+  );
 
-  return <JournalContext.Provider value={{ tags: data?.tags ?? [], activeTag: data?.tag ?? null, completed, onComplete, reopened, onReopen, target }}><Page $focusing={!!active} data-testid="page" data-focus-running={active ? 'true' : undefined}>
-    <TimerChrome>
-      <TimerTime data-testid="compact-timer-time" aria-hidden="true">{timerDuration(elapsed)}</TimerTime>
-      <TimerButton $pulse={timerPulse} $running={!!active} type="button" disabled={timerBusy || !data}
-        aria-label={active ? 'Stop focus timer' : 'Start focus timer'} aria-pressed={!!active}
-        title="Click to start/stop · right-click for sound"
-        onContextMenu={event => { event.preventDefault(); setSoundOpen(true); }}
-        onKeyDown={event => { if (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') { event.preventDefault(); setSoundOpen(true); } }}
-        onClick={() => void toggleTimer()}><TimerIcon size={16} aria-hidden="true" /></TimerButton>
-    </TimerChrome>
-    {!short && <TagTabs tags={data?.tags ?? []} active={activeTag} onSelect={tag => { void selectTag(tag); }} controls={sidebarControls} />}
-    <Main data-focus-surface>
-      {short ? <>
-        <ShortHeader>
-          <MobileTabs role="tablist" aria-label="Mobile views">
-            <MobileTab id="mobile-tab-todos" type="button" role="tab" aria-controls="mobile-panel-todos" aria-selected={mobileView === 'todos'} $active={mobileView === 'todos'} onClick={() => setMobileView('todos')}>to do</MobileTab>
-            <MobileTab id="mobile-tab-log" type="button" role="tab" aria-controls="mobile-panel-log" aria-selected={mobileView === 'log'} $active={mobileView === 'log'} onClick={() => setMobileView('log')}>log</MobileTab>
-            <MobileTab id="mobile-tab-tags" type="button" role="tab" aria-controls="mobile-panel-tags" aria-selected={mobileView === 'tags'} $active={mobileView === 'tags'} onClick={() => setMobileView('tags')}>tags</MobileTab>
-          </MobileTabs>
-        </ShortHeader>
-        <MobilePager ref={mobilePager} data-testid="mobile-pager" onScroll={event => {
-          const pager = event.currentTarget;
-          const next = (['todos', 'log', 'tags'] as const)[Math.max(0, Math.min(2, Math.round(pager.scrollLeft / pager.clientWidth)))];
-          setMobileView(previous => previous === next ? previous : next);
-        }}>
-          <MobilePane id="mobile-panel-todos" role="tabpanel" aria-labelledby="mobile-tab-todos" aria-hidden={mobileView !== 'todos'} inert={mobileView !== 'todos'}>{data ? <Todos key={data.tag ?? 'all'} tasks={data.tasks} refresh={refresh} notify={notify} /> : null}</MobilePane>
-          <MobilePane id="mobile-panel-log" role="tabpanel" aria-labelledby="mobile-tab-log" aria-hidden={mobileView !== 'log'} inert={mobileView !== 'log'}>{data && <LogFrame><LogViewport ref={logViewport} data-testid="log-scroll" data-top-fade={logScrolled || undefined}
-            onScroll={event => { const clipped = event.currentTarget.scrollTop > 12; setLogScrolled(previous => previous === clipped ? previous : clipped); }}>
-            <Journal key={data.tag ?? 'all'} scrollRoot={logViewport} days={data.days} today={data.today} refresh={refresh} notify={notify} openSessions={setSessionsDate}
-              sessionsEnabled={false} showHistory secondsForDay={secondsForDay} hasMore={!!data.next_cursor} loadMore={loadMore} />
-          </LogViewport><LogEdgeWash data-testid="log-top-ink-wash" $shown={logScrolled} aria-hidden="true" /></LogFrame>}</MobilePane>
-          <MobilePane id="mobile-panel-tags" role="tabpanel" aria-labelledby="mobile-tab-tags" aria-hidden={mobileView !== 'tags'} inert={mobileView !== 'tags'}>
-            <MobileTags>
-              <MobileTagCollection aria-label="Filter by tag">
-                <MobileTagPill type="button" $selected={activeTag === null} aria-pressed={activeTag === null} onClick={() => void selectTag(null)}><MobileTagPillLabel>all</MobileTagPillLabel></MobileTagPill>
-                {(data?.tags ?? []).map(tag => <MobileTagPill key={tag.name} type="button" $selected={activeTag === tag.name}
-                  aria-pressed={activeTag === tag.name} onClick={() => void selectTag(tag.name)}><MobileTagPillLabel>#{tag.name}</MobileTagPillLabel></MobileTagPill>)}
-              </MobileTagCollection>
-              <MobileTagControls>{sidebarControls}</MobileTagControls>
-            </MobileTags>
-          </MobilePane>
-        </MobilePager>
-      </> : <>
-        {!data ? <ConnectionState><Muted>{error || 'Loading…'}</Muted>{error && <Button onClick={() => { setError(''); void refresh().catch(e => setError(errorMessage(e))); }}>Retry</Button>}</ConnectionState> :
-          <Todos key={data.tag ?? 'all'} tasks={data.tasks} refresh={refresh} notify={notify} />}
-      {data &&
-        <LogFrame><LogViewport ref={logViewport} data-testid="log-scroll" data-top-fade={logScrolled || undefined}
-          onScroll={event => {
-            const clipped = event.currentTarget.scrollTop > 12;
-            setLogScrolled(previous => previous === clipped ? previous : clipped);
-          }}>
-        <Journal key={data.tag ?? 'all'} scrollRoot={logViewport} days={data.days} today={data.today} refresh={refresh} notify={notify} openSessions={setSessionsDate} secondsForDay={secondsForDay} hasMore={!!data.next_cursor} loadMore={loadMore} />
-        {error && <TextButton onClick={() => void refresh().catch(e => notify(errorMessage(e)))}>Connection lost · retry</TextButton>}
-        </LogViewport><LogEdgeWash data-testid="log-top-ink-wash" $shown={logScrolled} aria-hidden="true" /></LogFrame>
-      }
-      </>}
-    </Main>
-    <Suspense fallback={null}>
-      {sessionsDate && <SessionsModal date={sessionsDate} onClose={() => setSessionsDate(null)} onChange={refresh} />}
-      {statsOpen && <StatsModal open onClose={() => setStatsOpen(false)} />}
-      {searchOpen && <SearchModal open onClose={() => setSearchOpen(false)} onSelect={jumpTo} />}
-    </Suspense>
-    <Modal open={soundOpen} onClose={() => setSoundOpen(false)} title="Focus sound" compact><SoundMenu>
-      <TextButton aria-label={audible ? 'Mute focus sound' : 'Play focus sound'} onClick={() => void toggleSound()}>{audible ? 'Mute' : 'Play sound'}</TextButton>
-      <input aria-label="Focus sound volume" type="range" min="0" max="1" step="0.01" value={volume} onChange={e => { const value = Number(e.target.value); setVolume(value); localStorage.setItem('still-volume', String(value)); sound.current.setVolume(value); }} />
-    </SoundMenu></Modal>
-    <Modal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} title="Keyboard shortcuts" compact><ShortcutPanel>
-      <ShortcutRows data-testid="shortcut-rows">
-        <ShortcutRow><Demo>create the next entry</Demo><Keys>enter</Keys></ShortcutRow>
-        <ShortcutRow><Demo>add a line break</Demo><Keys>shift + enter</Keys></ShortcutRow>
-        <ShortcutRow><Demo>indent entry</Demo><Keys>tab</Keys></ShortcutRow>
-        <ShortcutRow><Demo>outdent entry</Demo><Keys>shift + tab</Keys></ShortcutRow>
-        <ShortcutRow><Demo>select all entries</Demo><Keys>⌘ + a twice</Keys></ShortcutRow>
-        <ShortcutRow><Demo>make this <strong>bold</strong></Demo><Keys>⌘ + b</Keys></ShortcutRow>
-        <ShortcutRow><Demo>make this <em>italic</em></Demo><Keys>⌘ + i</Keys></ShortcutRow>
-        <ShortcutRow><Demo>make this <u>underlined</u></Demo><Keys>⌘ + u</Keys></ShortcutRow>
-        <ShortcutRow><Demo>add or edit a <a href="#" onClick={event => event.preventDefault()}>link</a></Demo><Keys>⌘ + k</Keys></ShortcutRow>
-        <ShortcutRow><Demo>turn text into <code>code</code></Demo><Keys>⌘ + shift + c</Keys></ShortcutRow>
-        <ShortcutRow><Demo>search</Demo><Keys>⌘ + f</Keys></ShortcutRow>
-        <ShortcutRow><Demo>undo</Demo><Keys>⌘ + z</Keys></ShortcutRow>
-        <ShortcutRow><Demo>redo</Demo><Keys>⌘ + shift + z</Keys></ShortcutRow>
-      </ShortcutRows>
-    </ShortcutPanel></Modal>
-    {undoTask && !message && <Toast><TextButton aria-label="Undo task completion" onClick={async () => {
-      try { await documentUndo(); setUndoTask(null); }
-      catch (e) { notify(errorMessage(e)); }
-    }}>Undo</TextButton><TextButton aria-label="Dismiss undo" onClick={() => setUndoTask(null)}>×</TextButton></Toast>}
-    {message && <Toast role="status">{message}<TextButton aria-label="Dismiss notification" onClick={() => setMessage('')}>Dismiss</TextButton></Toast>}
-    <QuietStatus ref={quietStatus} role="status" aria-live="polite" data-show="false" />
-  </Page></JournalContext.Provider>;
+  return (
+    <JournalContext.Provider value={{ tags: data?.tags ?? [], activeTag: data?.tag ?? null, completed, onComplete, reopened, onReopen, target }}>
+      <Page $focusing={!!active} data-testid="page">
+        {/* Modern Top Navigation Bar */}
+        <TopNav>
+          <NavLeft>
+            <NavIconButton
+              aria-label="Toggle topics sidebar"
+              title="Topics & Tags"
+              onClick={() => setSidebarOpen(v => !v)}
+            >
+              <PanelLeft size={18} />
+            </NavIconButton>
+
+            <BrandButton type="button" onClick={() => void selectTag(null)}>
+              <div className="logo-badge">
+                <Sparkles size={16} />
+              </div>
+              <span>Logbook</span>
+            </BrandButton>
+
+            <SearchTrigger type="button" onClick={() => setSearchOpen(true)}>
+              <Search size={14} />
+              <span>Search...</span>
+              <kbd>⌘K</kbd>
+            </SearchTrigger>
+          </NavLeft>
+
+          <NavCenter>
+            {activeTag ? (
+              <FilterPill>
+                <span>#{activeTag}</span>
+                <button type="button" title="Clear tag filter" onClick={() => void selectTag(null)}>
+                  <X size={12} />
+                </button>
+              </FilterPill>
+            ) : (
+              data && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--muted)' }}>
+                  <Calendar size={14} />
+                  <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                </div>
+              )
+            )}
+          </NavCenter>
+
+          <NavRight>
+            {/* Sleek Interactive Focus Pill */}
+            <FocusCapsule
+              $running={!!active}
+              onContextMenu={e => { e.preventDefault(); setSoundOpen(true); }}
+            >
+              <div className="status-dot" />
+              <span className="time-text">{timerDuration(elapsed)}</span>
+              <CapsuleAction
+                $primary
+                disabled={timerBusy || !data}
+                title={active ? 'Pause Focus' : 'Start Focus'}
+                onClick={() => void toggleTimer()}
+              >
+                {active ? <Square size={12} /> : <Play size={12} />}
+              </CapsuleAction>
+              {active && (
+                <CapsuleAction
+                  title={audible ? 'Mute ambient sound' : 'Unmute ambient sound'}
+                  onClick={() => void toggleSound()}
+                >
+                  {audible ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                </CapsuleAction>
+              )}
+            </FocusCapsule>
+
+            <NavIconButton
+              aria-label="Focus statistics"
+              title="Focus Statistics"
+              onClick={() => setStatsOpen(true)}
+            >
+              <ChartNoAxesColumn size={17} />
+            </NavIconButton>
+
+            <NavIconButton
+              role="switch"
+              aria-label="Theme mode"
+              aria-checked={night}
+              title={night ? 'Switch to light mode' : 'Switch to dark mode'}
+              onClick={() => setNight(v => !v)}
+            >
+              {night ? <Sun size={17} /> : <Moon size={17} />}
+            </NavIconButton>
+          </NavRight>
+        </TopNav>
+
+        {/* Slide-out Sidebar Drawer */}
+        <TagTabs
+          tags={data?.tags ?? []}
+          active={activeTag}
+          isOpen={sidebarOpen}
+          onToggle={setSidebarOpen}
+          onSelect={tag => { void selectTag(tag); }}
+          controls={sidebarControls}
+        />
+
+        {/* Main Content Workspace */}
+        <MainContainer data-focus-surface>
+          {!data ? (
+            <ConnectionState>
+              <Muted>{error || 'Connecting to your logbook...'}</Muted>
+              {error && (
+                <Button $primary onClick={() => { setError(''); void refresh().catch(e => setError(errorMessage(e))); }}>
+                  Retry Connection
+                </Button>
+              )}
+            </ConnectionState>
+          ) : (
+            <>
+              {/* Task Hub */}
+              <Todos
+                key={data.tag ?? 'all'}
+                tasks={data.tasks}
+                refresh={refresh}
+                notify={notify}
+              />
+
+              {/* Journal Days Timeline */}
+              <LogViewport ref={logViewport}>
+                <Journal
+                  key={data.tag ?? 'all'}
+                  scrollRoot={logViewport}
+                  days={data.days}
+                  today={data.today}
+                  refresh={refresh}
+                  notify={notify}
+                  openSessions={setSessionsDate}
+                  secondsForDay={secondsForDay}
+                  hasMore={!!data.next_cursor}
+                  loadMore={loadMore}
+                />
+                {error && (
+                  <div style={{ textAlign: 'center', marginTop: 16 }}>
+                    <TextButton onClick={() => void refresh().catch(e => notify(errorMessage(e)))}>
+                      Connection lost · Click to retry
+                    </TextButton>
+                  </div>
+                )}
+              </LogViewport>
+            </>
+          )}
+        </MainContainer>
+
+        {/* Modals */}
+        <Suspense fallback={null}>
+          {sessionsDate && <SessionsModal date={sessionsDate} onClose={() => setSessionsDate(null)} onChange={refresh} />}
+          {statsOpen && <StatsModal open onClose={() => setStatsOpen(false)} />}
+          {searchOpen && <SearchModal open onClose={() => setSearchOpen(false)} onSelect={jumpTo} />}
+        </Suspense>
+
+        <Modal open={soundOpen} onClose={() => setSoundOpen(false)} title="Focus Audio" compact>
+          <SoundMenu>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>Ambient White Noise</span>
+              <Button $primary onClick={() => void toggleSound()}>
+                {audible ? 'Mute' : 'Play Sound'}
+              </Button>
+            </div>
+            <label style={{ fontSize: 12, color: 'var(--muted)', display: 'grid', gap: 6 }}>
+              Volume ({Math.round(volume * 100)}%)
+              <input
+                aria-label="Focus sound volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={volume}
+                onChange={e => {
+                  const value = Number(e.target.value);
+                  setVolume(value);
+                  localStorage.setItem('still-volume', String(value));
+                  sound.current.setVolume(value);
+                }}
+              />
+            </label>
+          </SoundMenu>
+        </Modal>
+
+        <Modal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} title="Keyboard Shortcuts" compact>
+          <ShortcutPanel>
+            <ShortcutRows>
+              <ShortcutRow><Demo>Create next bullet</Demo><Keys><kbd>Enter</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Line break within bullet</Demo><Keys><kbd>Shift</kbd> + <kbd>Enter</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Indent entry</Demo><Keys><kbd>Tab</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Outdent entry</Demo><Keys><kbd>Shift</kbd> + <kbd>Tab</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Bold</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>B</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Italic</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>I</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Underline</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>U</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Add or edit link</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>K</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Inline <code>code</code></Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Search journal</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>K</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Undo</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></Keys></ShortcutRow>
+              <ShortcutRow><Demo>Redo</Demo><Keys><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></Keys></ShortcutRow>
+            </ShortcutRows>
+          </ShortcutPanel>
+        </Modal>
+
+        {undoTask && !message && (
+          <Toast>
+            <span>Task marked as completed</span>
+            <Button onClick={async () => {
+              try { await documentUndo(); setUndoTask(null); }
+              catch (e) { notify(errorMessage(e)); }
+            }}>Undo</Button>
+            <CapsuleAction aria-label="Dismiss undo" onClick={() => setUndoTask(null)}>
+              <X size={14} />
+            </CapsuleAction>
+          </Toast>
+        )}
+
+        {message && (
+          <Toast role="status">
+            <span>{message}</span>
+            <CapsuleAction aria-label="Dismiss notification" onClick={() => setMessage('')}>
+              <X size={14} />
+            </CapsuleAction>
+          </Toast>
+        )}
+      </Page>
+    </JournalContext.Provider>
+  );
 }
