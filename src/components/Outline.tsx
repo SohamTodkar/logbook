@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import styled, { keyframes, css } from 'styled-components';
+import { Trash2 } from 'lucide-react';
 import { useJournalContext, registerDraftFlush } from '../JournalContext';
 import { api, ApiError, errorMessage } from '../api';
 import type { EntryKind, OutlineItem } from '../types';
@@ -39,7 +40,51 @@ const Item = styled.li<{ $leaving?: boolean; $arriving?: boolean; $shifting?: 'i
   ${({ $arriving }) => $arriving && css`animation: ${slideIn} 280ms cubic-bezier(.2,.7,.3,1) both;`}
   ${({ $shifting }) => $shifting && css`animation: ${$shifting === 'in' ? shiftIn : shiftOut} 220ms cubic-bezier(.2, 0, 0, 1) both;`}
 `;
-const Row = styled.div`position: relative; display: flex; align-items: flex-start; min-height: var(--bullet-row-height); @media(pointer: coarse) { min-height: 44px; } @media ${compactViewport} { min-height: 36px; }`;
+const Row = styled.div`
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-height: var(--bullet-row-height);
+  @media(pointer: coarse) { min-height: 44px; }
+  @media ${compactViewport} { min-height: 36px; }
+
+  &:hover .row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+`;
+
+const DeleteButton = styled.button`
+  opacity: 0;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 140ms ease, color 140ms ease, background-color 140ms ease;
+
+  &:hover {
+    color: var(--danger);
+    background: var(--soft);
+  }
+
+  @media(pointer: coarse) {
+    opacity: 0.6;
+    pointer-events: auto;
+    width: 32px;
+    height: 32px;
+  }
+`;
 const Branch = styled.div<{ $open: boolean }>`
   display: grid; min-height: 0;
   grid-template-rows: ${({ $open }) => $open ? '1fr' : '0fr'};
@@ -640,6 +685,14 @@ export function Outline({ kind, items, day, composer = false, archived = false, 
     persist(blank(records.current.filter(item => !selected.has(item.id)), composer));
     await refresh();
   });
+  const deleteItemTree = (item: OutlineItem) => {
+    const collectDescendants = (parentId: number): number[] => {
+      const children = records.current.filter(r => r.parent_id === parentId);
+      return children.flatMap(c => [c.id, ...collectDescendants(c.id)]);
+    };
+    const toDelete = [item.id, ...collectDescendants(item.id)];
+    deleteEntries(toDelete);
+  };
   useEffect(() => {
     const deleteSelection = (event: KeyboardEvent) => {
       if (selectionActive.current || event.defaultPrevented || event.key !== 'Backspace' && event.key !== 'Delete') return;
@@ -900,14 +953,28 @@ export function Outline({ kind, items, day, composer = false, archived = false, 
     const content = group.map(item => item === null ? renderDraft(depth) : <Item key={item.id} data-outline-key={key} data-done={!!item.completed_at && !archived} data-kind={entryKind(item)} data-item-id={item.id} data-depth={depth} $leaving={completing === item.id}
       onPointerLeave={() => clearPreview(item.id)}
       $arriving={entryKind(item) === 'tasks' && (completed.has(item.id) || reopened.has(item.id))}>
-      <Row>{renderMarker(item.id, item.content)}<Text $done={!!item.completed_at && !archived} $action={archived && entryKind(item) === 'tasks'} role="group" tabIndex={0} aria-label={markdownText(item.content) || (item.tags ?? []).filter(tag => tag !== activeTag).map(tag => '#' + tag).join(' ')}
-        onClick={event => { if ((archived || !item.completed_at) && !(event.target as HTMLElement).closest('a')) select(item, event.currentTarget); }}
-        onContextMenu={event => {
-          const link = (event.target as HTMLElement).closest('a');
-          if (link && (archived || !item.completed_at)) { event.preventDefault(); select(item, event.currentTarget, link); }
-        }}
-        onKeyDown={event => { if ((archived || !item.completed_at) && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } }}
-      ><MarkdownContent content={item.content} tags={activeTag ? item.tags?.filter(tag => tag !== activeTag) : item.tags} /></Text>
+      <Row>
+        {renderMarker(item.id, item.content)}
+        <Text $done={!!item.completed_at && !archived} $action={archived && entryKind(item) === 'tasks'} role="group" tabIndex={0} aria-label={markdownText(item.content) || (item.tags ?? []).filter(tag => tag !== activeTag).map(tag => '#' + tag).join(' ')}
+          onClick={event => { if ((archived || !item.completed_at) && !(event.target as HTMLElement).closest('a')) select(item, event.currentTarget); }}
+          onContextMenu={event => {
+            const link = (event.target as HTMLElement).closest('a');
+            if (link && (archived || !item.completed_at)) { event.preventDefault(); select(item, event.currentTarget, link); }
+          }}
+          onKeyDown={event => { if ((archived || !item.completed_at) && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } }}
+        ><MarkdownContent content={item.content} tags={activeTag ? item.tags?.filter(tag => tag !== activeTag) : item.tags} /></Text>
+        <DeleteButton
+          className="row-actions"
+          type="button"
+          title="Delete entry"
+          aria-label="Delete entry"
+          onClick={event => {
+            event.stopPropagation();
+            deleteItemTree(item);
+          }}
+        >
+          <Trash2 size={13} />
+        </DeleteButton>
       </Row>
       <Branch data-branch-for={item.id} $open={isExpanded(item.id)} aria-hidden={!isExpanded(item.id)}>{renderChildren(item.id, depth + 1)}</Branch>
     </Item>);

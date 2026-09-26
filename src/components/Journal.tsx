@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import styled from 'styled-components';
-import { Calendar, ChevronDown, ListTodo, Zap } from 'lucide-react';
+import { Calendar, ChevronDown, ListTodo, Trash2, Zap } from 'lucide-react';
 import { dateObject, duration, errorMessage } from '../api';
 import type { Day, Task } from '../types';
 import { TextButton } from '../styles';
 import { Outline } from './Outline';
 import { useJournalContext } from '../JournalContext';
+import { editDocument } from '../documentHistory';
 import { compactViewport, fullViewport } from '../layout';
 
 const TodoCard = styled.section`
@@ -205,6 +206,42 @@ const FocusBadge = styled.button`
   }
 `;
 
+const DateActionsGroup = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+const ClearTasksButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+
+  svg {
+    opacity: 0.7;
+  }
+
+  &:hover {
+    color: var(--danger);
+    background: var(--surface-elevated);
+    border-color: var(--danger);
+    transform: translateY(-1px);
+    svg {
+      opacity: 1;
+    }
+  }
+`;
+
 const Body = styled.div`
   min-width: 0;
   flex: 1;
@@ -338,6 +375,7 @@ export function Journal({
           ...(day.tasks ?? []).map(task => ({ ...task, kind: 'tasks' as const })),
         ];
         const targeted = target && entries.some(entry => entry.kind === target.kind && entry.id === target.id);
+        const completedTasks = entries.filter(e => (e.kind === 'tasks' || e.kind === 'task') && e.id);
 
         return (
           <DayCard
@@ -361,18 +399,41 @@ export function Journal({
                 </span>
               </DateTitleGroup>
 
-              {seconds >= 1 && (
-                <FocusBadge
-                  type="button"
-                  aria-label={`Focus sessions for ${day.date}`}
-                  disabled={!sessionsEnabled}
-                  onClick={() => { if (sessionsEnabled) openSessions(day.date); }}
-                  title={sessionsEnabled ? 'View & edit focus sessions' : undefined}
-                >
-                  <Zap size={13} />
-                  <span>{duration(seconds, true)} focused</span>
-                </FocusBadge>
-              )}
+              <DateActionsGroup>
+                {completedTasks.length > 0 && (
+                  <ClearTasksButton
+                    type="button"
+                    title={`Delete ${completedTasks.length} completed task(s) from ${title}`}
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      if (!window.confirm(`Delete ${completedTasks.length} completed task(s) from ${title}?`)) return;
+                      try {
+                        await editDocument(completedTasks.map(t => ({ kind: 'tasks', id: t.id, delete: true })));
+                        await refresh();
+                        notify(`Deleted ${completedTasks.length} task(s) from ${title}`);
+                      } catch (err) {
+                        notify(errorMessage(err));
+                      }
+                    }}
+                  >
+                    <Trash2 size={12} />
+                    <span>Clear completed tasks</span>
+                  </ClearTasksButton>
+                )}
+
+                {seconds >= 1 && (
+                  <FocusBadge
+                    type="button"
+                    aria-label={`Focus sessions for ${day.date}`}
+                    disabled={!sessionsEnabled}
+                    onClick={() => { if (sessionsEnabled) openSessions(day.date); }}
+                    title={sessionsEnabled ? 'View & edit focus sessions' : undefined}
+                  >
+                    <Zap size={13} />
+                    <span>{duration(seconds, true)} focused</span>
+                  </FocusBadge>
+                )}
+              </DateActionsGroup>
             </DateHead>
 
             <Body>
